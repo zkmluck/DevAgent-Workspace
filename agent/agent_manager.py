@@ -19,6 +19,7 @@ from github_api.repo_fetch import (
 )
 from github_api.pr_client import PRCreationError, create_github_pr
 from vector_db.chroma_client import RepoVectorDB
+from utils.reflex_bridge import review_pr
 
 
 def _finding_line(item: dict) -> str:
@@ -76,6 +77,17 @@ def build_report_markdown(state: dict) -> str:
     pr = state.get("pr") or {}
     if pr:
         lines += ["## PR 草稿", f"**标题**: {pr.get('title', '')}", "", pr.get("body", ""), ""]
+
+    reflex = state.get("reflex") or {}
+    if reflex:
+        lines += ["## 反射弧裁决", ""]
+        lines.append(f"- 判决：**{reflex.get('verdict')}**（{reflex.get('client')}）")
+        lines.append(
+            f"- block={reflex.get('block')}  noise={reflex.get('noise')}  "
+            f"risk_class={reflex.get('risk_class')}  推送权限={reflex.get('can_push')}"
+        )
+        lines += [f"- {reason}" for reason in (reflex.get("reasons") or [])]
+        lines += [""]
 
     if state.get("error"):
         lines += ["## 错误", state["error"], ""]
@@ -192,23 +204,55 @@ class AgentManager:
         final["artifacts_dir"] = self._save_artifacts(final)
 
         if create_pr:
-            pr_data = final.get("pr") or {}
-            try:
-                pr_info = create_github_pr(
-                    repo_url,
-                    final["artifacts_dir"],
-                    title=pr_data.get("title", ""),
-                    body=pr_data.get("llm_body") or pr_data.get("body", ""),
-                    base_branch=final.get("branch", ""),
-                )
-                pr_data.update(pr_info)
-                final["logs"].append(
-                    f"[github_pr] 已创建 PR #{pr_info['pr_number']}: {pr_info['html_url']}"
-                )
-            except Exception as exc:
-                pr_data["github_error"] = str(exc)
-                final["logs"].append(f"[github_pr] 创建 PR 失败: {exc}")
+            self._create_pr_if_allowed(repo_url, final)
         return final
+
+    def _create_pr_if_allowed(self, repo_url: str, final: dict) -> None:
+        """对外写操作前的最后一道闸门：放行 → 建；降级 → 草稿；拦下 → 不建。
+
+        闸门不可用时（没装 jev-reflex-gate，或 REFLEX_ENABLED=0）保持原行为，
+        只在日志里说明，不让可选依赖决定工作台能不能跑。
+        """
+
+        pr_data = final.get("pr") or {}
+        final["pr"] = pr_data
+
+        reflex = review_pr(repo_url, final["artifacts_dir"], final)
+        if reflex is None:
+            final["logs"].append(
+                "[reflex] 闸门不可用（未安装 jev-reflex-gate 或已在配置里关闭），按原流程执行"
+            )
+        else:
+            final["reflex"] = reflex
+            reasons = "；".join(reflex["reasons"]) or "无"
+            final["logs"].append(
+                f"[reflex] 判决 {reflex['verdict']}（{reflex['client']}）: {reasons}"
+            )
+            if reflex["blocked"]:
+                pr_data["reflex_blocked"] = True
+                final["logs"].append("[reflex] 已拦下这次对外写操作，未创建 PR")
+                return
+
+        draft = bool(reflex and reflex.get("downgrade_to_draft"))
+        if draft:
+            final["logs"].append("[reflex] 落在中间地带：降级为草稿 PR，待人工复核")
+
+        try:
+            pr_info = create_github_pr(
+                repo_url,
+                final["artifacts_dir"],
+                title=pr_data.get("title", ""),
+                body=pr_data.get("llm_body") or pr_data.get("body", ""),
+                base_branch=final.get("branch", ""),
+                draft=draft,
+            )
+            pr_data.update(pr_info)
+            final["logs"].append(
+                f"[github_pr] 已创建 PR #{pr_info['pr_number']}: {pr_info['html_url']}"
+            )
+        except Exception as exc:
+            pr_data["github_error"] = str(exc)
+            final["logs"].append(f"[github_pr] 创建 PR 失败: {exc}")
 
     def _fallback_run(self, state: dict) -> dict:
         """LangGraph 不可用时按同样顺序执行，保证功能不依赖额外编排包。"""

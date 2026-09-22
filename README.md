@@ -64,6 +64,43 @@ curl "http://127.0.0.1:8000/read_file?repo_name=X-futur%2FerrAnalyst&file_path=R
 
 仓库缓存位于 `.repos/`，Chroma 数据位于 `.chroma/`，两者都已加入 `.gitignore`。
 
+## 反射弧护栏（动作前的概率闸门）
+
+勾选"创建 GitHub PR"之后，工作台在**真正对外写之前**会先问一次闸门：建分支、提交、
+必要时 fork、开 PR 这一串动作，现在该不该做。闸门来自同目录下的
+`jev-reflex-gate/`（独立仓库，见其 README）。
+
+一次判断会拿到四个类型化答案：**该不该拦下**（noul）、**是不是没价值**（noul）、
+**风险属于哪一类**（choice）、**影响面多大**（score），然后按三档分流：
+
+| 判决 | 含义 | 工作台的动作 |
+| --- | --- | --- |
+| `allow` | 干净的正常提交 | 按原流程建 PR |
+| `review` | 不危险，但可能是没价值的打扰 | 降级为**草稿 PR**，待人工复核 |
+| `block` | 越权推送、含密钥之类 | 不建 PR，日志与报告里写明理由 |
+
+判决会写进运行日志和分析报告的"反射弧裁决"一节，同时按 `action_id` 留痕，
+可事后回放"当时为什么放行"。
+
+配置在 `.env`（可直接沿用同目录 `jev-reflex-gate/.env`）：
+
+```
+REFLEX_CLIENT=qwen            # mock（离线）/ jev（真 Jev API）/ qwen（Qwen 替身）
+QWEN_API_KEY=sk-...           # 用 qwen 时必填
+REFLEX_ALLOW_BELOW=0.20       # 低于此值且类别正常、噪音低 → 放行
+REFLEX_BLOCK_ABOVE=0.65       # 达到此值 → 拦下
+REFLEX_NOISE_ABOVE=0.90       # 达到此值 → 降级为草稿
+REFLEX_ENABLED=0              # 一键关掉闸门，回到接入前的行为
+```
+
+没有安装 `jev-reflex-gate` 时工作台照常运行，只在日志里说明闸门不可用。
+
+想在不创建任何真实 PR 的前提下验证四条路径：
+
+```bash
+python verify_reflex_gate.py
+```
+
 ## 目录结构
 
 ```text
@@ -82,6 +119,9 @@ curl "http://127.0.0.1:8000/read_file?repo_name=X-futur%2FerrAnalyst&file_path=R
 ├── github_api/pr_client.py    # PyGithub fork/分支/创建 PR
 ├── vector_db/chroma_client.py # ChromaDB 封装
 ├── ui/web_ui.py            # Gradio 界面
+├── utils/reflex_bridge.py  # 反射弧接入层（可缺席）
+├── verify_reflex_gate.py   # 闸门接入的干跑验证（不创建真实 PR）
+├── jev-reflex-gate/        # 反射弧本体（独立仓库，已在 .gitignore 中）
 ├── main.py                 # FastAPI /read_file 接口
 └── run.py                  # Gradio 启动入口
 ```
