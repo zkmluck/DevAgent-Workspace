@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jev-reflex-gate"
+version = "0.1.0"
+description = "动作前的概率闸门：用 Jev 的类型化决策决定 agent 的对外写操作放行、拦截还是降级。"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["jev_reflex"]

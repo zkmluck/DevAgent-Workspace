@@ -126,7 +126,7 @@ python verify_reflex_gate.py
 ├── ui/web_ui.py            # Gradio 界面
 ├── utils/reflex_bridge.py  # 反射弧接入层（可缺席）
 ├── verify_reflex_gate.py   # 闸门接入的干跑验证（不创建真实 PR）
-├── jev-reflex-gate/        # 反射弧本体（独立仓库，已在 .gitignore 中）
+├── jev-reflex-gate/        # 反射弧本体：可安装的 Python 包 + 71 个单测 + 评测集
 ├── main.py                 # FastAPI /read_file 接口
 └── run.py                  # Gradio 启动入口
 ```
