@@ -66,6 +66,11 @@ curl "http://127.0.0.1:8000/read_file?repo_name=X-futur%2FerrAnalyst&file_path=R
 
 ## 反射弧护栏（动作前的概率闸门）
 
+**默认不对外写。** `ALLOW_EXTERNAL_WRITE=0`（默认值）时，工作台只在本地
+`output/<owner>__<repo>/` 产出报告、PR 草稿、测试骨架和文档草稿，不会建分支、不会
+提 PR；闸门仍会跑一遍并给出"如果真提会怎么判"的预演结论，只写日志不落任何外部动作。
+要真的往仓库里提，才把 `ALLOW_EXTERNAL_WRITE` 改成 `1`。
+
 勾选"创建 GitHub PR"之后，工作台在**真正对外写之前**会先问一次闸门：建分支、提交、
 必要时 fork、开 PR 这一串动作，现在该不该做。闸门来自同目录下的
 `jev-reflex-gate/`（独立仓库，见其 README）。

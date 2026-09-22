@@ -10,7 +10,7 @@ from agent.doc_update_agent import DocUpdateAgent
 from agent.pr_writer_agent import PRWriterAgent
 from agent.repo_analyze_agent import RepoAnalyzeAgent
 from agent.test_gen_agent import TestGenAgent
-from app.config import OUTPUT_DIR
+from app.config import OUTPUT_DIR, external_write_allowed
 from github_api.repo_fetch import (
     GitHubError,
     fetch_repo,
@@ -212,10 +212,19 @@ class AgentManager:
 
         闸门不可用时（没装 jev-reflex-gate，或 REFLEX_ENABLED=0）保持原行为，
         只在日志里说明，不让可选依赖决定工作台能不能跑。
+
+        另外还有一层更硬的开关：`ALLOW_EXTERNAL_WRITE` 默认关闭，此时无论如何都不会
+        对外写，闸门只做"预演"——照常给出判决，但只写日志，不建分支、不开 PR。
         """
 
         pr_data = final.get("pr") or {}
         final["pr"] = pr_data
+        external_allowed = external_write_allowed()
+        if not external_allowed:
+            final["logs"].append(
+                "[guard] 对外写已关闭（ALLOW_EXTERNAL_WRITE=0）：本次只在本地产出，"
+                "闸门仅做预演"
+            )
 
         reflex = review_pr(repo_url, final["artifacts_dir"], final)
         if reflex is None:
@@ -232,6 +241,19 @@ class AgentManager:
                 pr_data["reflex_blocked"] = True
                 final["logs"].append("[reflex] 已拦下这次对外写操作，未创建 PR")
                 return
+
+        if not external_allowed:
+            if reflex is not None:
+                final["logs"].append(
+                    "[guard] 预演结论：若允许对外写，这次的处置是 "
+                    + ("拦下" if reflex["blocked"] else
+                       "降级为草稿 PR" if reflex.get("downgrade_to_draft") else "正常建 PR")
+                )
+            final["logs"].append(
+                f"[guard] 未创建任何 PR；本地产物在 {final['artifacts_dir']}"
+            )
+            pr_data["dry_run"] = True
+            return
 
         draft = bool(reflex and reflex.get("downgrade_to_draft"))
         if draft:

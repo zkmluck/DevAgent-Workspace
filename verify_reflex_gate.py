@@ -11,6 +11,7 @@
   ③ 空产物（没价值）          → 绝不作为正常 PR 建出去（拦下或降级都算合格）
   ④ REFLEX_ENABLED=0          → 回到接入前的行为
   ⑤ 注入一个"中间地带"判决    → 必须降级为草稿（把这条分支钉死，不靠模型碰运气）
+  ⑥ 默认配置（不设 ALLOW_EXTERNAL_WRITE）→ 只做本地产出，闸门只预演，绝不对外写
 
 ③ 之所以只断言"不许正常建出去"，是因为用大模型当替身时同一个输入会漂移：
 实测同一条空产物，一次给 block=0.35（降级）、一次给 0.95（拦下）。两档都安全，
@@ -75,7 +76,12 @@ def _run_case(manager, label: str, repo_url: str, artifacts_dir: Path, pr: dict)
         + (f"（draft={CALLS[0]['draft']}）" if called else "")
     )
     print()
-    return {"reflex": reflex, "called": called, "draft": CALLS[0]["draft"] if CALLS else None}
+    return {
+        "reflex": reflex,
+        "called": called,
+        "draft": CALLS[0]["draft"] if CALLS else None,
+        "logs": list(final["logs"]),
+    }
 
 
 def main() -> int:
@@ -90,6 +96,8 @@ def main() -> int:
     own_repo = "https://github.com/zkmluck/DevAgent-Workspace"
     checks: list = []
 
+    # 前五条要验证"允许对外写"时的分支，所以显式打开；最后一条回到默认。
+    os.environ["ALLOW_EXTERNAL_WRITE"] = "1"
     with tempfile.TemporaryDirectory() as empty_dir:
         clean = _run_case(
             manager, "① 正常：自己的仓库 + 干净产物", own_repo, artifacts,
@@ -138,6 +146,20 @@ def main() -> int:
         )
         agent_manager.review_pr = real_bridge
         checks.append(("中间地带降级为草稿 PR", degraded["called"] and degraded["draft"] is True))
+
+    os.environ.pop("ALLOW_EXTERNAL_WRITE", None)
+    local_only = _run_case(
+        manager, "⑥ 默认配置：只在本地产出，闸门只预演", own_repo, artifacts,
+        {"title": "docs(devagent): 自动分析报告", "body": "干净内容。"},
+    )
+    checks.append(
+        (
+            "默认不对外写（含闸门预演）",
+            not local_only["called"]
+            and bool(local_only["reflex"])
+            and any("预演" in line for line in local_only["logs"]),
+        )
+    )
 
     print("=" * 62)
     for label, passed in checks:

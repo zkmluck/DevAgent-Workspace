@@ -51,3 +51,16 @@ def llm_configured() -> bool:
 def github_configured() -> bool:
     """是否已配置 GitHub Token（可显著提高 API 限额）。"""
     return bool(GITHUB_TOKEN)
+
+
+def external_write_allowed() -> bool:
+    """是否允许对外写（建分支、提交、fork、开 PR）。
+
+    默认 **否**：工作台只在本地 `output/` 目录产出，不往任何仓库写。这是刻意的默认值——
+    对外写不可逆、会惊动别人，应该是一个需要显式打开的动作。
+
+    每次调用都重新读环境变量，而不是在导入时读死，这样运行期也能改，验证脚本也能翻。
+    要打开就设 `ALLOW_EXTERNAL_WRITE=1`。
+    """
+
+    return os.getenv("ALLOW_EXTERNAL_WRITE", "0").strip().lower() in {"1", "true", "yes", "on"}
